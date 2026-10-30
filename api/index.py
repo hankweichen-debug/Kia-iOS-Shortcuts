@@ -33,10 +33,9 @@ def get_manager():
             pin=PIN
         )
         vm.token = tok
-        if hasattr(vm, "kia_uvo_api") and vm.kia_uvo_api:
-            vm.kia_uvo_api.token = tok
-        # 透過 Token 抓取帳號下的車輛資料
-        vm.kia_uvo_api.get_vehicles()
+        if hasattr(vm, "api") and vm.api:
+            vm.api.token = tok
+        vm.check_and_refresh_token()
     else:
         vm.check_and_refresh_token()
         
@@ -56,7 +55,7 @@ def unlock_car():
         vm = get_manager()
         vm.update_all_vehicles_with_cached_state()
         if not vm.vehicles:
-            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定於此 Kia 帳號"}), 404
+            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
         v_id = list(vm.vehicles.keys())[0]
         vm.unlock(v_id)
         return jsonify({"status": "success", "action": "unlock", "vehicle_id": v_id})
@@ -72,7 +71,7 @@ def lock_car():
         vm = get_manager()
         vm.update_all_vehicles_with_cached_state()
         if not vm.vehicles:
-            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定於此 Kia 帳號"}), 404
+            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
         v_id = list(vm.vehicles.keys())[0]
         vm.lock(v_id)
         return jsonify({"status": "success", "action": "lock", "vehicle_id": v_id})
