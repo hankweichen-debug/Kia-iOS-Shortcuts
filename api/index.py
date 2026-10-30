@@ -1,7 +1,6 @@
 import os
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
-from hyundai_kia_connect_api.exceptions import AuthenticationError
+from hyundai_kia_connect_api import VehicleManager
 
 app = Flask(__name__)
 
@@ -12,17 +11,20 @@ PIN = os.environ.get("KIA_PIN", "0000")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 VEHICLE_ID = os.environ.get("VEHICLE_ID")
 
-def get_vm():
-    if not USERNAME or not PASSWORD or not SECRET_KEY:
-        raise ValueError("Missing environment variables")
-    # Region 3 is USA
-    return VehicleManager(region=3, brand=1, username=USERNAME, password=PASSWORD, pin=PIN)
-
 def verify_key():
     req_key = request.args.get("key") or request.headers.get("Authorization")
-    if not req_key or req_key != SECRET_KEY:
-        return False
-    return True
+    return req_key == SECRET_KEY
+
+def get_vm(otp=None):
+    if not USERNAME or not PASSWORD or not SECRET_KEY:
+        raise ValueError("Missing environment variables")
+    # Region 3: USA, Brand 1: Kia
+    vm = VehicleManager(region=3, brand=1, username=USERNAME, password=PASSWORD, pin=PIN)
+    if otp:
+        vm.check_and_refresh_token(otp=str(otp))
+    else:
+        vm.check_and_refresh_token()
+    return vm
 
 @app.route("/", methods=["GET"])
 @app.route("/api", methods=["GET"])
@@ -34,9 +36,9 @@ def home():
 def unlock_car():
     if not verify_key():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    otp = request.args.get("otp")
     try:
-        vm = get_vm()
-        vm.check_and_refresh_token()
+        vm = get_vm(otp=otp)
         vm.update_all_vehicles_with_cached_state()
         v_id = VEHICLE_ID or list(vm.vehicles.keys())[0]
         vm.unlock(v_id)
@@ -49,9 +51,9 @@ def unlock_car():
 def lock_car():
     if not verify_key():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    otp = request.args.get("otp")
     try:
-        vm = get_vm()
-        vm.check_and_refresh_token()
+        vm = get_vm(otp=otp)
         vm.update_all_vehicles_with_cached_state()
         v_id = VEHICLE_ID or list(vm.vehicles.keys())[0]
         vm.lock(v_id)
@@ -59,5 +61,4 @@ def lock_car():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Vercel WSGI entrypoint
 handler = app
