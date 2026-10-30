@@ -35,10 +35,9 @@ def get_manager():
         vm.token = tok
         if hasattr(vm, "api") and vm.api:
             vm.api.token = tok
-        # 直接使用現有 Token 獲取車輛，不執行 refresh
-        vehicles = vm.api.get_vehicles()
-        for v in vehicles:
-            vm.vehicles[v.id] = v
+            vehicles = vm.api.get_vehicles(tok)
+            for v in vehicles:
+                vm.vehicles[v.id] = v
     else:
         vm.check_and_refresh_token()
         
