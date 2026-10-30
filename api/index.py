@@ -1,6 +1,8 @@
 import os
+import datetime
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import VehicleManager
+from hyundai_kia_connect_api.Token import Token
 
 app = Flask(__name__)
 
@@ -8,6 +10,8 @@ USERNAME = os.environ.get("KIA_USERNAME")
 PASSWORD = os.environ.get("KIA_PASSWORD")
 PIN = os.environ.get("KIA_PIN", "0000")
 SECRET_KEY = os.environ.get("SECRET_KEY")
+ACCESS_TOKEN = os.environ.get("KIA_ACCESS_TOKEN")
+DEVICE_ID = os.environ.get("KIA_DEVICE_ID")
 
 def verify_key():
     req_key = request.args.get("key") or request.headers.get("Authorization")
@@ -16,8 +20,24 @@ def verify_key():
 def get_manager():
     if not USERNAME or not PASSWORD or not SECRET_KEY:
         raise ValueError("缺少必要的環境變數")
+    
     vm = VehicleManager(region=3, brand=1, username=USERNAME, password=PASSWORD, pin=PIN)
-    vm.check_and_refresh_token()
+    
+    if ACCESS_TOKEN:
+        tok = Token(
+            username=USERNAME,
+            password=PASSWORD,
+            access_token=ACCESS_TOKEN,
+            device_id=DEVICE_ID,
+            valid_until=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365),
+            pin=PIN
+        )
+        vm.token = tok
+        if hasattr(vm, "kia_uvo_api") and vm.kia_uvo_api:
+            vm.kia_uvo_api.token = tok
+    else:
+        vm.check_and_refresh_token()
+        
     return vm
 
 @app.route("/", methods=["GET"])
