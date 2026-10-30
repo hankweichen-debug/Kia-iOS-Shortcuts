@@ -35,7 +35,10 @@ def get_manager():
         vm.token = tok
         if hasattr(vm, "api") and vm.api:
             vm.api.token = tok
-        vm.check_and_refresh_token()
+        # 直接使用現有 Token 獲取車輛，不執行 refresh
+        vehicles = vm.api.get_vehicles()
+        for v in vehicles:
+            vm.vehicles[v.id] = v
     else:
         vm.check_and_refresh_token()
         
@@ -53,7 +56,6 @@ def unlock_car():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
         vm = get_manager()
-        vm.update_all_vehicles_with_cached_state()
         if not vm.vehicles:
             return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
         v_id = list(vm.vehicles.keys())[0]
@@ -69,7 +71,6 @@ def lock_car():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
         vm = get_manager()
-        vm.update_all_vehicles_with_cached_state()
         if not vm.vehicles:
             return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
         v_id = list(vm.vehicles.keys())[0]
