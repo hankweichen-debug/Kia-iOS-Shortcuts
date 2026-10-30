@@ -5,272 +5,59 @@ from hyundai_kia_connect_api.exceptions import AuthenticationError
 
 app = Flask(__name__)
 
-# =========================
 # Environment Variables
-# =========================
 USERNAME = os.environ.get("KIA_USERNAME")
 PASSWORD = os.environ.get("KIA_PASSWORD")
-PIN = os.environ.get("KIA_PIN")
+PIN = os.environ.get("KIA_PIN", "0000")
 SECRET_KEY = os.environ.get("SECRET_KEY")
-VEHICLE_ID = os.environ.get("VEHICLE_ID")  # Optional
+VEHICLE_ID = os.environ.get("VEHICLE_ID")
 
-missing = []
-if not USERNAME:
-    missing.append("KIA_USERNAME")
-if not PASSWORD:
-    missing.append("KIA_PASSWORD")
-if not PIN:
-    missing.append("KIA_PIN")
-if not SECRET_KEY:
-    missing.append("SECRET_KEY")
+def get_vm():
+    if not USERNAME or not PASSWORD or not SECRET_KEY:
+        raise ValueError("Missing environment variables")
+    # Region 3 is USA
+    return VehicleManager(region=3, brand=1, username=USERNAME, password=PASSWORD, pin=PIN)
 
-if missing:
-    raise ValueError(f"Missing environment variables: {', '.join(missing)}")
+def verify_key():
+    req_key = request.args.get("key") or request.headers.get("Authorization")
+    if not req_key or req_key != SECRET_KEY:
+        return False
+    return True
 
-# =========================
-# Vehicle Manager
-# =========================
-vehicle_manager = VehicleManager(
-    region=3,  # North America
-    brand=1,   # KIA
-    username=USERNAME,
-    password=PASSWORD,
-    pin=str(PIN)
-)
-
-# =========================
-# Helper Functions
-# =========================
-def authorize_request():
-    return request.headers.get("Authorization") == SECRET_KEY
-
-
-def ensure_authenticated():
-    """
-    Attempt to refresh Kia token.
-    Will fail if Kia requires OTP / captcha.
-    """
-    try:
-        vehicle_manager.check_and_refresh_token()
-    except AuthenticationError as e:
-        raise AuthenticationError(
-            "Kia authentication failed. "
-            "Open the Kia app and complete 2FA, then retry."
-        ) from e
-
-
-def refresh_and_sync():
-    """
-    Refresh token and sync vehicle state
-    """
-    ensure_authenticated()
-    vehicle_manager.update_all_vehicles_with_cached_state()
-
-
-def get_vehicle_id():
-    """
-    Return VEHICLE_ID if provided, otherwise
-    dynamically select the first vehicle.
-    """
-    if VEHICLE_ID:
-        return VEHICLE_ID
-
-    vehicles = vehicle_manager.vehicles
-    if not vehicles:
-        raise ValueError("No vehicles found on the Kia account.")
-
-    first_vehicle_id = next(iter(vehicles.keys()))
-    return first_vehicle_id
-
-
-# =========================
-# Logging
-# =========================
-@app.before_request
-def log_request_info():
-    print(f"Incoming request: {request.method} {request.path}")
-
-
-# =========================
-# Routes
-# =========================
 @app.route("/", methods=["GET"])
-def root():
-    return jsonify({
-        "status": "OK",
-        "service": "Kia Vehicle Control API"
-    }), 200
+@app.route("/api", methods=["GET"])
+def home():
+    return jsonify({"status": "ready", "message": "Kia iOS Shortcuts API is running!"})
 
-
-@app.route("/auth_status", methods=["GET"])
-def auth_status():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        ensure_authenticated()
-        return jsonify({"status": "authenticated"}), 200
-    except AuthenticationError as e:
-        return jsonify({
-            "status": "authentication_failed",
-            "message": str(e)
-        }), 401
-
-
-@app.route("/list_vehicles", methods=["GET"])
-def list_vehicles():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        refresh_and_sync()
-
-        vehicles = vehicle_manager.vehicles
-        if not vehicles:
-            return jsonify({"error": "No vehicles found"}), 404
-
-        vehicle_list = [
-            {
-                "name": v.name,
-                "id": v.id,
-                "model": v.model,
-                "year": v.year
-            }
-            for v in vehicles.values()
-        ]
-
-        return jsonify({
-            "status": "success",
-            "vehicles": vehicle_list
-        }), 200
-
-    except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/start_climate", methods=["POST"])
-def start_climate():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        refresh_and_sync()
-        vehicle_id = get_vehicle_id()
-
-        climate_options = ClimateRequestOptions(
-            set_temp=72,
-            duration=10
-        )
-
-        result = vehicle_manager.start_climate(vehicle_id, climate_options)
-
-        return jsonify({
-            "status": "climate_started",
-            "result": result
-        }), 200
-
-    except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/stop_climate", methods=["POST"])
-def stop_climate():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        refresh_and_sync()
-        vehicle_id = get_vehicle_id()
-
-        result = vehicle_manager.stop_climate(vehicle_id)
-
-        return jsonify({
-            "status": "climate_stopped",
-            "result": result
-        }), 200
-
-    except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/unlock_car", methods=["POST"])
+@app.route("/unlock_car", methods=["GET", "POST"])
+@app.route("/api/unlock_car", methods=["GET", "POST"])
 def unlock_car():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
+    if not verify_key():
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
-        refresh_and_sync()
-        vehicle_id = get_vehicle_id()
-
-        result = vehicle_manager.unlock(vehicle_id)
-
-        return jsonify({
-            "status": "car_unlocked",
-            "result": result
-        }), 200
-
-    except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
-
+        vm = get_vm()
+        vm.check_and_refresh_token()
+        vm.update_all_vehicles_with_cached_state()
+        v_id = VEHICLE_ID or list(vm.vehicles.keys())[0]
+        vm.unlock(v_id)
+        return jsonify({"status": "success", "action": "unlock", "vehicle_id": v_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-
-@app.route("/lock_car", methods=["POST"])
+@app.route("/lock_car", methods=["GET", "POST"])
+@app.route("/api/lock_car", methods=["GET", "POST"])
 def lock_car():
-    if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
-
+    if not verify_key():
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
-        refresh_and_sync()
-        vehicle_id = get_vehicle_id()
-
-        result = vehicle_manager.lock(vehicle_id)
-
-        return jsonify({
-            "status": "car_locked",
-            "result": result
-        }), 200
-
-    except AuthenticationError as e:
-        return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
-        }), 401
-
+        vm = get_vm()
+        vm.check_and_refresh_token()
+        vm.update_all_vehicles_with_cached_state()
+        v_id = VEHICLE_ID or list(vm.vehicles.keys())[0]
+        vm.lock(v_id)
+        return jsonify({"status": "success", "action": "lock", "vehicle_id": v_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-
-# =========================
-# App Entry
-# =========================
-if __name__ == "__main__":
-    print("Starting Kia Vehicle Control API...")
-    app.run(host="0.0.0.0", port=8080)
+# Vercel WSGI entrypoint
+handler = app
