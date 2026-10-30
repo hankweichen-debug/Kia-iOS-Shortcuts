@@ -17,31 +17,23 @@ def verify_key():
     req_key = request.args.get("key") or request.headers.get("Authorization")
     return req_key == SECRET_KEY
 
-def get_manager():
+def get_vm_and_token():
     if not USERNAME or not PASSWORD or not SECRET_KEY:
         raise ValueError("缺少必要的環境變數")
     
     vm = VehicleManager(region=3, brand=1, username=USERNAME, password=PASSWORD, pin=PIN)
-    
-    if ACCESS_TOKEN:
-        tok = Token(
-            username=USERNAME,
-            password=PASSWORD,
-            access_token=ACCESS_TOKEN,
-            device_id=DEVICE_ID,
-            valid_until=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365),
-            pin=PIN
-        )
-        vm.token = tok
-        if hasattr(vm, "api") and vm.api:
-            vm.api.token = tok
-            vehicles = vm.api.get_vehicles(tok)
-            for v in vehicles:
-                vm.vehicles[v.id] = v
-    else:
-        vm.check_and_refresh_token()
-        
-    return vm
+    tok = Token(
+        username=USERNAME,
+        password=PASSWORD,
+        access_token=ACCESS_TOKEN,
+        device_id=DEVICE_ID,
+        valid_until=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365),
+        pin=PIN
+    )
+    vm.token = tok
+    if hasattr(vm, "api") and vm.api:
+        vm.api.token = tok
+    return vm, tok
 
 @app.route("/", methods=["GET"])
 @app.route("/api", methods=["GET"])
@@ -54,12 +46,14 @@ def unlock_car():
     if not verify_key():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
-        vm = get_manager()
-        if not vm.vehicles:
-            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
-        v_id = list(vm.vehicles.keys())[0]
-        vm.unlock(v_id)
-        return jsonify({"status": "success", "action": "unlock", "vehicle_id": v_id})
+        vm, tok = get_vm_and_token()
+        vehicles = vm.api.get_vehicles(tok)
+        if not vehicles:
+            return jsonify({"status": "error", "message": "找不到車輛"}), 404
+        vehicle = vehicles[0]
+        # 直接使用底層 API 解鎖，不觸發 VehicleManager 內部的 refresh
+        res = vm.api.unlock(tok, vehicle)
+        return jsonify({"status": "success", "action": "unlock", "response": str(res)})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -69,12 +63,14 @@ def lock_car():
     if not verify_key():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
     try:
-        vm = get_manager()
-        if not vm.vehicles:
-            return jsonify({"status": "error", "message": "找不到車輛，請確認車輛已綁定"}), 404
-        v_id = list(vm.vehicles.keys())[0]
-        vm.lock(v_id)
-        return jsonify({"status": "success", "action": "lock", "vehicle_id": v_id})
+        vm, tok = get_vm_and_token()
+        vehicles = vm.api.get_vehicles(tok)
+        if not vehicles:
+            return jsonify({"status": "error", "message": "找不到車輛"}), 404
+        vehicle = vehicles[0]
+        # 直接使用底層 API 上鎖
+        res = vm.api.lock(tok, vehicle)
+        return jsonify({"status": "success", "action": "lock", "response": str(res)})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
